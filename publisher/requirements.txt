@@ -1,0 +1,4 @@
+docker
+influxdb_client
+python-dotenv
+requests
