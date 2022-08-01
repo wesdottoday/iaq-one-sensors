@@ -7,8 +7,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-EXPOSE 8008
-
-VOLUME ["/shared"]
+VOLUME ["/mnt/shared"]
 
 ENTRYPOINT ["python", "app.py"]

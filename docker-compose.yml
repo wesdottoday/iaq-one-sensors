@@ -4,6 +4,8 @@ services:
   publisher:
     image: koti-publisher:0.0.1
     container_name: publisher
+    ports:
+      - 8080:8080
     volumes:
       - /mnt/shared:/shared
       - /var/run/docker.sock:/var/run/docker.sock

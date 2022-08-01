@@ -3,33 +3,21 @@
 import bme680
 import time
 import json
-from threading import Thread, local
-from flask import Flask
+import requests
 
 sensor_type = 'bme680'
 software_version = '0.0.1'
-filename = '/shared/{}.json'.format(sensor_type)
-errorlog = '/shared/{}-error.log'.format(sensor_type)
-
-app = Flask(__name__)
+filename = '/mnt/shared/{}.json'.format(sensor_type)
+applog = '/mnt/shared/{}.log'.format(sensor_type)
+publish_path = 'http://publisher:8080/node/update'
 
 # Global Vars - DO NOT TOUCH #
 last_update = ''
 
 ##############################
 
-def thread_running():
-    alive = getsensordata_thread.is_alive()
-    if alive == True:
-        return "ok"
-    elif alive == False:
-        return "failed"
-    else:
-        return "unknown"
-
-def health_data():
-    thread_status = thread_running()
-    return {"sensor_type": sensor_type, "software_version": software_version, "last_sensor_update": last_update, "sensor_process": thread_status, "last_data_update": last_update}
+def node_specs():
+    return {"sensor_type": sensor_type, "software_version": software_version, "last_sensor_update": last_update, "last_data_update": last_update}
 
 def localTime():
     seconds = time.time()
@@ -37,20 +25,16 @@ def localTime():
     local_time = time.strftime("%d-%m-%Y %H:%M:%S", result)
     return local_time
 
-def updateFile(output):
-    f = open(filename, 'w+')
-    f.write(output)
-    f.close()
-
-def updateLog(log):
-    f = open(errorlog, 'a')
-    f.write(log)
-    f.close()
-
-def trackLastUpdate():
-    local_time = localTime()
-    last_update = local_time
-    return last_update
+def publish(update):
+    try:
+        r = requests.post(publish_path, json=update)
+        if r.status_code == 200:
+            print('published {}'.format(update))
+        else:
+            print('Failed to publish: {}'.format(str(r.status_code)))
+    except Exception as e:
+        print(e)
+        pass
 
 def getSensorData(last_update):
     try:
@@ -124,81 +108,74 @@ def getSensorData(last_update):
             else:
                 print('Loading initial readings\n')
                 print('\n')
-
-            if sensor.get_sensor_data():
-                
-                output["sensor_type"] = sensor_type
-                output["local_time"] = localTime()
-                temp_c = '{:.2f}'.format(sensor.data.temperature)
-                temp_f = '{:.2f}'.format(sensor.data.temperature * 1.8 + 32)
-                press = '{:.2f}'.format(sensor.data.pressure)
-                humid = '{:.2f}'.format(sensor.data.humidity)
-                output["temperature_c"] = float(temp_c)
-                output["temperature_f"] = float(temp_f)
-                output["pressure"] = float(press)
-                output["humidity"] = float(humid)
-
-                if sensor.data.heat_stable:
-                    gas = sensor.data.gas_resistance
-                    gas_offset = gas_baseline - gas
-
-                    hum = sensor.data.humidity
-                    hum_offset = hum - hum_baseline
-
-                    if hum_offset > 0:
-                        hum_score = (100 - hum_baseline - hum_offset)
-                        hum_score /= (100 - hum_baseline)
-                        hum_score *= (hum_weighting * 100)
+            try:
+                if sensor.get_sensor_data():
                     
-                    else:
-                        hum_score = (hum_baseline + hum_offset)
-                        hum_score /= hum_baseline
-                        hum_score *= (hum_weighting * 100)
-                    
-                    if gas_offset > 0:
-                        gas_score = (gas / gas_baseline)
-                        gas_score *= (100 - (hum_weighting * 100))
+                    output["sensor_type"] = sensor_type
+                    output["local_time"] = localTime()
+                    temp_c = '{:.2f}'.format(sensor.data.temperature)
+                    temp_f = '{:.2f}'.format(sensor.data.temperature * 1.8 + 32)
+                    press = '{:.2f}'.format(sensor.data.pressure)
+                    humid = '{:.2f}'.format(sensor.data.humidity)
+                    output["temperature_c"] = float(temp_c)
+                    output["temperature_f"] = float(temp_f)
+                    output["pressure"] = float(press)
+                    output["humidity"] = float(humid)
+
+                    if sensor.data.heat_stable:
+                        gas = sensor.data.gas_resistance
+                        gas_offset = gas_baseline - gas
+
+                        hum = sensor.data.humidity
+                        hum_offset = hum - hum_baseline
+
+                        if hum_offset > 0:
+                            hum_score = (100 - hum_baseline - hum_offset)
+                            hum_score /= (100 - hum_baseline)
+                            hum_score *= (hum_weighting * 100)
+                        
+                        else:
+                            hum_score = (hum_baseline + hum_offset)
+                            hum_score /= hum_baseline
+                            hum_score *= (hum_weighting * 100)
+                        
+                        if gas_offset > 0:
+                            gas_score = (gas / gas_baseline)
+                            gas_score *= (100 - (hum_weighting * 100))
+
+                        else:
+                            gas_score = 100 - (hum_weighting * 100)
+
+                        # Calculate air_quality_score.
+                        air_quality_score = hum_score + gas_score
+
+                        output["gas_resistance"] = float(gas)
+                        output["air_quality_score"] = air_quality_score
+                        output["gas_score"] = gas_score
+                        output["gas_baseline"] = gas_baseline
+                        output["gas_offset"] = gas_offset
+                        output["hum_score"] = hum_score
+                        output["hum_baseline"] = hum_baseline
+                        output["hum_offset"] = hum_offset
+                        output = str(output)
+                        print(output)
+                        publish(output)
 
                     else:
-                        gas_score = 100 - (hum_weighting * 100)
+                        output = str(output)
+                        print(output)
+                        publish(output)
 
-                    # Calculate air_quality_score.
-                    air_quality_score = hum_score + gas_score
-
-                    output["gas_resistance"] = float(gas)
-                    output["air_quality_score"] = air_quality_score
-                    output["gas_score"] = gas_score
-                    output["gas_baseline"] = gas_baseline
-                    output["gas_offset"] = gas_offset
-                    output["hum_score"] = hum_score
-                    output["hum_baseline"] = hum_baseline
-                    output["hum_offset"] = hum_offset
-                    output = str(output)
-                    updateFile(output)
-                    last_update = trackLastUpdate()
-                    return last_update
-                else:
-                    output = str(output)
-                    updateFile(output)
-                    last_update = trackLastUpdate()
-                    return last_update
-
-
-            time.sleep(5)
+                time.sleep(10)
+            
+            except Exception as e:
+                print(e)
 
     except KeyboardInterrupt:
         pass
 
     except Exception as e:
-        updateLog(e)
-
-@app.route("/health", methods=["GET"])
-def health():
-    cur_health = health_data()
-    return cur_health
+        print(e)
 
 if __name__ == "__main__":
-    getsensordata_thread = Thread(target=getSensorData, args=(last_update,))
-    getsensordata_thread.start()
-    
-    app.run(host='0.0.0.0', port=8080, debug=True)
+    getSensorData(last_update)

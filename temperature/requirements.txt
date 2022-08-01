@@ -1,2 +1,2 @@
 bme680
-flask
+requests

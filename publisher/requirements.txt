@@ -2,3 +2,5 @@ docker
 influxdb_client
 python-dotenv
 requests
+flask
+logging2
