@@ -11,8 +11,18 @@ from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import SYNCHRONOUS
 from flask import Flask, request
 import sys
+import logging
 
 app = Flask(__name__)
+
+### Log Level
+# DEBUG
+# INFO
+# WARNING
+# ERROR
+# CRITICAL
+
+log_level = 'INFO'
 
 # Global variables
 
@@ -47,6 +57,8 @@ try:
 except Exception as e:
     print("Failed to connect to docker")
 
+
+# Prep & Send Readings to InfluxDb
 def prepareReading(friendly_name,customer_id,measurement_name,measurement):
     point = Point("reading")\
         .tag("friendly_name", friendly_name)\
@@ -54,34 +66,22 @@ def prepareReading(friendly_name,customer_id,measurement_name,measurement):
         .field(measurement_name, measurement)\
         .time(datetime.datetime.utcnow(), WritePrecision.NS)
     #insert logic for a healthcheck point
+    app.logger.debug("Prepared reading: {}".format(point))
 
     return point
 
-# def prepareHealthReadings(friendly_name,customer_id,containers_details_health):
-#     fields = ['']
-    
-#     for c in containers_details_health:
-#         sensor_type = ''
-#     point_list = []
-#     point_health = Point("health_data")\
-#         .tag("friendly_name", friendly_name)\
-#         .tag("customer_id", customer_id)\
-#         .tag("sensor_type", sensor_type)
-        
 
 def sendData(point):
     try:
         write_api.write(record=point, org=org, bucket=bucket)
-        print("Wrote point")
+        app.logger.debug("Sent reading: {}".format(point))
+        status = 'written'
     except Exception as e:
-        print("Cannot write customer datapoint with error {}".format(e))
+        app.logger.error("Error sending reading: {}".format(e))
+        status = 'failed'
     
-    # try:
-    #     write_api.write(record=point_dl, org=org, bucket=lake)
-    # except Exception as e:
-    #     print("Cannot write lake datapoint with error {}".format(e))
-    
-    # Write ability to send health data to IDB
+    return status
+
 
 def getContainers():
     container_list = docker_client.containers.list(all)
@@ -129,28 +129,50 @@ def getHealthData(container_details):
             print(e)
     return container_details
 
+
 def publish(payload):
     while True:
         container_details = getContainers()
-        try:
-            for key in payload:
-                if key != 'sensor_type' and key != 'local_time':
+
+        app.logger.debug('Payload received: {}'.format(payload))
+        
+        for key in payload:
+        
+            if key != 'sensor_type' and key != 'local_time':
+        
+                try:
+                    app.logger.debug('Preparing point for {}'.format(key))
                     measurement_name = '{}-{}'.format(payload['sensor_type'],key)
                     measurement = payload[key]
                     
                     point = prepareReading(friendly_name,customer_id,measurement_name,measurement)
-                    sendData(point)
+                    try: 
+                        result = sendData(point)
+                    except Exception as e:
+                        print('Failed to sendData {}'.format(e))
+                    
+                    if result == 'written':
+                        status = 'published'
+                    else:
+                        status = 'failed'
 
             
-        except Exception as e:
-            print("************************************************************************************")
-            print("************************************************************************************")
-            print("Failure... with error {}".format(e))
-            print("************************************************************************************")
-            print("************************************************************************************")
-            pass
+                except Exception as e:
+                    print("************************************************************************************")
+                    print("************************************************************************************")
+                    print("Failure... with error {}".format(e))
+                    print("************************************************************************************")
+                    print("************************************************************************************")
+                    pass
+                
         
-        time.sleep(1)  
+                if status == 'published':
+                    continue
+                else:
+                    return 'failed'
+        
+        return 'published'
+
 
 @app.route("/node/update", methods=["POST"])
 def nodeUpdate():
@@ -161,11 +183,17 @@ def nodeUpdate():
                 payload = payload.replace("\'", "\"")
                 payload = json.loads(payload)
         try:
-            publish(payload)
+            result = publish(payload)
+            
         except Exception as e:
             print(e)
+            return "Failed", 500
         
-        return "Ack", 200
+        if result == 'published':
+            return "Ack", 200
+        else:
+            return "Failed", 500
+        
     else: 
         return 'Content-Type: {} not supported!'.format(content_type)
 
@@ -173,5 +201,22 @@ def nodeUpdate():
 def publisherHealth():
     return "healthy", 200
 
+def set_log_level(log_level):
+    if log_level == 'DEBUG':
+        app.logger.setLevel(logging.DEBUG)
+    elif log_level == 'INFO':
+        app.logger.setLevel(logging.INFO)
+    elif log_level == 'WARNING':
+        app.logger.setLevel(logging.WARNING)
+    elif log_level == 'ERROR':
+        app.logger.setLevel(logging.ERROR)
+    elif log_level == 'CRITICAL':
+        app.logger.setLevel(logging.CRITICAL)
+    else:
+        print('Not sure what you want me to do with a log_level of {}, so I will just spit everything at you...'.format(log_level))
+        app.logger.setLevel(logging.DEBUG)
+
 if __name__ == "__main__":
+    set_log_level(log_level)
+    print('Log Level: {}'.format(log_level))
     app.run(host='0.0.0.0', port=8080, debug=True)

@@ -88,7 +88,7 @@ def getSensorData(last_update):
 
             #print('Gas Baseline: {} Ohms, humidity baseline: {:.2f} %RH\n'.format(gas_baseline,hum_baseline))
 
-        print('Polling sensor data, check {} for current data'.format(filename))
+        print('Polling sensor data')
 
         output = {}
         while True:
@@ -158,12 +158,12 @@ def getSensorData(last_update):
                         output["hum_baseline"] = hum_baseline
                         output["hum_offset"] = hum_offset
                         output = str(output)
-                        print(output)
+                        print('gas stabilized output: {}'.format(output))
                         publish(output)
 
                     else:
                         output = str(output)
-                        print(output)
+                        print('gas not stabilized output: {}'.format(output))
                         publish(output)
 
                 time.sleep(10)
